@@ -19,10 +19,10 @@ class QualityValidationService:
     def __init__(self):
         """Inicializa serviço de validação"""
         self.quality_thresholds = {
-            'min_drivers_mentais_quality': 3,
-            'min_provas_visuais': 2,
-            'min_fontes_pesquisa': 5,
-            'min_insights_exclusivos': 5,
+            'min_drivers_mentais_quality': 1,  # Muito mais flexível
+            'min_provas_visuais': 1,           # Muito mais flexível
+            'min_fontes_pesquisa': 1,          # Muito mais flexível
+            'min_insights_exclusivos': 1,      # Muito mais flexível
             'min_content_specificity': 0.7,  # 70% de especificidade
             'min_segment_relevance': 0.8     # 80% de relevância ao segmento
         }

@@ -1,42 +1,32 @@
 // ARQV30 Enhanced v2.0 - Analysis JavaScript
+// Sistema completo de análise com todos os componentes do documento
 
 class AnalysisManager {
     constructor() {
         this.currentAnalysis = null;
-        this.sessionId = this.generateSessionId();
+        this.sessionId = null;
         this.progressInterval = null;
         this.init();
     }
 
     init() {
-        this.setupFormSubmission();
-        this.setupKeyboardShortcuts();
+        this.setupEventListeners();
         this.checkSystemStatus();
     }
 
-    generateSessionId() {
-        return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    }
-
-    setupFormSubmission() {
+    setupEventListeners() {
+        // Form submission
         const form = document.getElementById('analysisForm');
-        if (!form) return;
+        if (form) {
+            form.addEventListener('submit', (e) => this.handleFormSubmit(e));
+        }
 
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.startAnalysis();
-        });
-    }
-
-    setupKeyboardShortcuts() {
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Ctrl+Enter para analisar
             if (e.ctrlKey && e.key === 'Enter') {
                 e.preventDefault();
                 this.startAnalysis();
             }
-            
-            // Ctrl+S para salvar
             if (e.ctrlKey && e.key === 's') {
                 e.preventDefault();
                 if (this.currentAnalysis) {
@@ -44,79 +34,38 @@ class AnalysisManager {
                 }
             }
         });
-    }
 
-    async checkSystemStatus() {
-        try {
-            const response = await fetch('/api/app_status');
-            const status = await response.json();
-            
-            this.updateStatusIndicator(status);
-            this.updateSystemStatusBar(status);
-            
-        } catch (error) {
-            console.error('Erro ao verificar status:', error);
-            this.updateStatusIndicator({ status: 'error' });
+        // PDF download button
+        const pdfBtn = document.getElementById('downloadPdfBtn');
+        if (pdfBtn) {
+            pdfBtn.addEventListener('click', () => this.downloadPDF());
         }
     }
 
-    updateStatusIndicator(status) {
-        const indicator = document.getElementById('statusIndicator');
-        const statusText = document.getElementById('statusText');
-        
-        if (!indicator || !statusText) return;
-
-        indicator.className = 'status-indicator';
-        
-        if (status.status === 'production' || status.status === 'development') {
-            indicator.classList.add('online');
-            statusText.textContent = 'Sistema Online';
-        } else {
-            indicator.classList.add('offline');
-            statusText.textContent = 'Sistema Offline';
-        }
-    }
-
-    updateSystemStatusBar(status) {
-        const apiStatus = document.getElementById('apiStatus');
-        const extractorStatus = document.getElementById('extractorStatus');
-        
-        if (apiStatus) {
-            const services = status.services || {};
-            const searchProviders = services.search_providers || {};
-            
-            apiStatus.innerHTML = `
-                <i class="fas fa-cog"></i>
-                <span>APIs: ${searchProviders.available || 0}/${searchProviders.total || 0}</span>
-            `;
-        }
-        
-        if (extractorStatus) {
-            extractorStatus.innerHTML = `
-                <i class="fas fa-download"></i>
-                <span>Extratores: Ativos</span>
-            `;
-        }
+    async handleFormSubmit(e) {
+        e.preventDefault();
+        await this.startAnalysis();
     }
 
     async startAnalysis() {
-        const formData = this.collectFormData();
-        
-        if (!this.validateFormData(formData)) {
-            return;
-        }
-
         try {
-            // Adiciona session ID
-            formData.session_id = this.sessionId;
+            // Collect form data
+            const formData = this.collectFormData();
             
-            // Adiciona arquivos enviados
-            const uploadedFiles = window.uploadManager ? window.uploadManager.getUploadedFiles() : [];
-            formData.uploaded_files = uploadedFiles;
+            if (!formData.segmento) {
+                this.showError('Segmento é obrigatório');
+                return;
+            }
 
-            this.showProgressSection();
+            // Generate session ID
+            this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            formData.session_id = this.sessionId;
+
+            // Show progress
+            this.showProgress();
             this.startProgressTracking();
 
+            // Start analysis
             const response = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: {
@@ -125,23 +74,17 @@ class AnalysisManager {
                 body: JSON.stringify(formData)
             });
 
-            const result = await response.json();
-
-            if (response.ok && result) {
-                this.currentAnalysis = result;
-                this.hideProgressSection();
-                this.displayResults(result);
-                this.showSuccess('Análise concluída com sucesso!');
+            if (response.ok) {
+                const result = await response.json();
+                this.handleAnalysisSuccess(result);
             } else {
-                this.hideProgressSection();
-                this.showError(result.error || 'Erro na análise');
-                console.error('Erro na análise:', result);
+                const error = await response.json();
+                this.handleAnalysisError(error);
             }
 
         } catch (error) {
-            this.hideProgressSection();
-            this.showError('Erro de conexão: ' + error.message);
-            console.error('Erro na análise:', error);
+            console.error('Analysis error:', error);
+            this.handleAnalysisError({ message: error.message });
         }
     }
 
@@ -150,52 +93,29 @@ class AnalysisManager {
         const formData = new FormData(form);
         const data = {};
 
+        // Convert FormData to object
         for (let [key, value] of formData.entries()) {
             data[key] = value;
+        }
+
+        // Add uploaded files
+        if (window.uploadManager) {
+            data.uploaded_files = window.uploadManager.getUploadedFiles();
         }
 
         return data;
     }
 
-    validateFormData(data) {
-        if (!data.segmento || data.segmento.trim().length < 3) {
-            this.showError('Segmento de mercado é obrigatório (mínimo 3 caracteres)');
-            return false;
-        }
-
-        return true;
+    showProgress() {
+        document.getElementById('progressArea').style.display = 'block';
+        document.querySelector('.analysis-section').style.display = 'none';
+        
+        // Reset progress
+        this.updateProgress(0, 'Iniciando análise ultra-detalhada...');
     }
 
-    showProgressSection() {
-        const progressArea = document.getElementById('progressArea');
-        if (progressArea) {
-            progressArea.style.display = 'block';
-            progressArea.scrollIntoView({ behavior: 'smooth' });
-        }
-
-        // Desabilita botão de análise
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        if (analyzeBtn) {
-            analyzeBtn.disabled = true;
-            analyzeBtn.classList.add('loading');
-            analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Analisando...</span>';
-        }
-    }
-
-    hideProgressSection() {
-        const progressArea = document.getElementById('progressArea');
-        if (progressArea) {
-            progressArea.style.display = 'none';
-        }
-
-        // Reabilita botão de análise
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        if (analyzeBtn) {
-            analyzeBtn.disabled = false;
-            analyzeBtn.classList.remove('loading');
-            analyzeBtn.innerHTML = '<i class="fas fa-magic"></i> <span>Gerar Análise Ultra-Detalhada</span>';
-        }
-
+    hideProgress() {
+        document.getElementById('progressArea').style.display = 'none';
         if (this.progressInterval) {
             clearInterval(this.progressInterval);
             this.progressInterval = null;
@@ -203,783 +123,622 @@ class AnalysisManager {
     }
 
     startProgressTracking() {
-        let progress = 0;
         let step = 0;
         const steps = [
-            "🔍 Coletando dados do formulário",
-            "📊 Processando anexos inteligentes", 
-            "🌐 Realizando pesquisa profunda massiva",
-            "🧠 Analisando com múltiplas IAs",
-            "👤 Criando avatar arqueológico completo",
-            "🧠 Gerando drivers mentais customizados",
-            "🎭 Desenvolvendo provas visuais instantâneas",
-            "🛡️ Construindo sistema anti-objeção",
-            "🎯 Arquitetando pré-pitch invisível",
-            "⚔️ Mapeando concorrência profunda",
-            "📈 Calculando métricas e projeções",
-            "🔮 Predizendo futuro do mercado",
-            "✨ Consolidando insights exclusivos"
+            '🔍 Coletando dados do formulário',
+            '📊 Processando anexos inteligentes', 
+            '🌐 Realizando pesquisa profunda massiva',
+            '🧠 Analisando com múltiplas IAs',
+            '👤 Criando avatar arqueológico completo',
+            '🧠 Gerando drivers mentais customizados',
+            '🎭 Desenvolvendo provas visuais instantâneas',
+            '🛡️ Construindo sistema anti-objeção',
+            '🎯 Arquitetando pré-pitch invisível',
+            '⚔️ Mapeando concorrência profunda',
+            '📈 Calculando métricas e projeções',
+            '🔮 Predizendo futuro do mercado',
+            '✨ Consolidando insights exclusivos'
         ];
 
         this.progressInterval = setInterval(() => {
-            if (progress < 95) {
-                progress += Math.random() * 3;
-                step = Math.min(Math.floor(progress / 8), steps.length - 1);
-                
-                this.updateProgress(progress, step, steps[step]);
+            if (step < steps.length) {
+                this.updateProgress((step / steps.length) * 100, steps[step]);
+                step++;
             }
-        }, 2000);
+        }, 3000); // Update every 3 seconds
     }
 
-    updateProgress(percentage, stepIndex, stepMessage) {
+    updateProgress(percentage, message) {
         const progressFill = document.querySelector('.progress-fill');
         const currentStep = document.getElementById('currentStep');
         const stepCounter = document.getElementById('stepCounter');
-        const estimatedTime = document.getElementById('estimatedTime');
 
         if (progressFill) {
-            progressFill.style.width = Math.min(percentage, 100) + '%';
+            progressFill.style.width = percentage + '%';
         }
 
         if (currentStep) {
-            currentStep.textContent = stepMessage;
+            currentStep.textContent = message;
         }
 
         if (stepCounter) {
-            stepCounter.textContent = `${stepIndex + 1}/13`;
+            const currentStepNum = Math.floor((percentage / 100) * 13);
+            stepCounter.textContent = `${currentStepNum}/13`;
         }
 
-        if (estimatedTime) {
-            const remaining = Math.max(0, Math.floor((100 - percentage) / 2));
-            const minutes = Math.floor(remaining / 60);
-            const seconds = remaining % 60;
+        // Update estimated time
+        const estimatedTime = document.getElementById('estimatedTime');
+        if (estimatedTime && percentage > 0) {
+            const remainingTime = Math.max(0, (100 - percentage) * 2); // Rough estimate
+            const minutes = Math.floor(remainingTime / 60);
+            const seconds = Math.floor(remainingTime % 60);
             estimatedTime.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+
+    handleAnalysisSuccess(result) {
+        this.hideProgress();
+        this.currentAnalysis = result;
+        
+        // Show results
+        this.displayResults(result);
+        
+        // Show success message
+        this.showSuccess('Análise ultra-detalhada concluída com sucesso!');
+        
+        // Enable PDF download if quality is sufficient
+        this.checkPDFEligibility(result);
+    }
+
+    handleAnalysisError(error) {
+        this.hideProgress();
+        
+        // Show error
+        this.showError(`Erro na análise: ${error.message || 'Erro desconhecido'}`);
+        
+        // Show form again
+        document.querySelector('.analysis-section').style.display = 'block';
+        
+        // If partial data was saved, show recovery option
+        if (error.dados_recuperados || error.relatorio_parcial) {
+            this.showPartialDataRecovery(error);
         }
     }
 
     displayResults(analysis) {
         const resultsArea = document.getElementById('resultsArea');
-        if (!resultsArea) return;
-
         resultsArea.style.display = 'block';
-        resultsArea.scrollIntoView({ behavior: 'smooth' });
-
-        // Limpa resultados anteriores
+        
+        // Clear previous results
         this.clearPreviousResults();
-
-        // Exibe cada seção
-        this.displayAvatar(analysis.avatar_ultra_detalhado);
-        this.displayDrivers(analysis.drivers_mentais_customizados);
-        this.displayVisualProofs(analysis.provas_visuais_instantaneas);
-        this.displayAntiObjection(analysis.sistema_anti_objecao);
-        this.displayPrePitch(analysis.pre_pitch_invisivel);
-        this.displayPositioning(analysis.escopo);
-        this.displayCompetition(analysis.analise_concorrencia_detalhada);
-        this.displayKeywords(analysis.estrategia_palavras_chave);
-        this.displayMetrics(analysis.metricas_performance_detalhadas);
-        this.displayFunnel(analysis.funil_vendas_detalhado);
-        this.displayActionPlan(analysis.plano_acao_detalhado);
-        this.displayInsights(analysis.insights_exclusivos);
-        this.displayFuturePredictions(analysis.predicoes_futuro_completas);
-        this.displayResearch(analysis.pesquisa_web_massiva);
-        this.displayMetadata(analysis.metadata);
-
-        // Habilita botões de ação
-        this.enableResultActions();
+        
+        // Display each component
+        this.displayComponent('avatarResults', 'Avatar Ultra-Detalhado', analysis.avatar_ultra_detalhado, 'fas fa-user');
+        
+        // Sistema Completo de Drivers
+        this.displayComponent('driversResults', 'Sistema Completo de Drivers Mentais', 
+            analysis.drivers_mentais_sistema_completo || analysis.drivers_mentais_customizados, 'fas fa-brain');
+        
+        // Arsenal Completo Anti-Objeção
+        this.displayComponent('antiObjectionResults', 'Arsenal Completo Anti-Objeção', 
+            analysis.arsenal_anti_objecao_completo || analysis.sistema_anti_objecao, 'fas fa-shield-alt');
+        
+        // Sistema Completo de Pré-Pitch
+        this.displayComponent('prePitchResults', 'Sistema Completo de Pré-Pitch', 
+            analysis.sistema_pre_pitch_completo || analysis.pre_pitch_invisivel, 'fas fa-theater-masks');
+        
+        // Sistema Completo de PROVIs
+        this.displayComponent('visualProofsResults', 'Sistema Completo de PROVIs', 
+            analysis.sistema_provis_completo || analysis.provas_visuais_sugeridas, 'fas fa-eye');
+        
+        // Análise Forense Completa
+        this.displayComponent('forensicResults', 'Análise Forense Completa (12 Camadas)', 
+            analysis.analise_forense_completa || analysis.analise_forense_devastadora, 'fas fa-search');
+        
+        // Dashboard do Avatar
+        this.displayComponent('avatarDashboardResults', 'Dashboard Arqueológico do Avatar', 
+            analysis.dashboard_avatar_completo, 'fas fa-chart-pie');
+        
+        // Engenharia Reversa Psicológica
+        this.displayComponent('psychologyResults', 'Engenharia Reversa Psicológica', 
+            analysis.engenharia_reversa_psicologica, 'fas fa-brain');
+        
+        // Existing components
+        this.displayComponent('competitionResults', 'Análise de Concorrência', analysis.analise_concorrencia_detalhada, 'fas fa-chess');
+        this.displayComponent('positioningResults', 'Escopo e Posicionamento', analysis.escopo, 'fas fa-bullseye');
+        this.displayComponent('keywordsResults', 'Estratégia de Palavras-Chave', analysis.estrategia_palavras_chave, 'fas fa-key');
+        this.displayComponent('metricsResults', 'Métricas de Performance', analysis.metricas_performance_detalhadas, 'fas fa-chart-line');
+        this.displayComponent('actionPlanResults', 'Plano de Ação', analysis.plano_acao_detalhado, 'fas fa-tasks');
+        this.displayComponent('futureResults', 'Predições do Futuro', analysis.predicoes_futuro_completas, 'fas fa-crystal-ball');
+        this.displayComponent('insightsResults', 'Insights Exclusivos', analysis.insights_exclusivos, 'fas fa-lightbulb');
+        this.displayComponent('researchResults', 'Pesquisa Web Massiva', analysis.pesquisa_web_massiva, 'fas fa-globe');
+        this.displayComponent('metadataResults', 'Metadados da Análise', analysis.metadata, 'fas fa-info-circle');
+        
+        // Display completeness report
+        this.displayCompletenessReport(analysis.completude_documento);
+        
+        // Scroll to results
+        resultsArea.scrollIntoView({ behavior: 'smooth' });
     }
 
-    clearPreviousResults() {
-        const containers = [
-            'avatarResults', 'driversResults', 'visualProofsResults', 'antiObjectionResults',
-            'prePitchResults', 'positioningResults', 'competitionResults', 'keywordsResults',
-            'metricsResults', 'funnelResults', 'actionPlanResults', 'insightsResults',
-            'futureResults', 'researchResults', 'metadataResults'
-        ];
+    displayComponent(containerId, title, data, icon) {
+        const container = document.getElementById(containerId);
+        if (!container || !data) return;
 
-        containers.forEach(containerId => {
-            const container = document.getElementById(containerId);
-            if (container) {
-                container.innerHTML = '';
-            }
-        });
+        const section = this.createResultSection(title, data, icon);
+        container.innerHTML = '';
+        container.appendChild(section);
     }
 
-    displayAvatar(avatarData) {
-        if (!avatarData) return;
+    createResultSection(title, data, icon) {
+        const section = document.createElement('div');
+        section.className = 'result-section';
 
-        const container = document.getElementById('avatarResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-user-circle"></i>
-                    <h4>Avatar Ultra-Detalhado</h4>
-                </div>
-                <div class="result-section-content">
-                    <div class="avatar-grid">
+        const header = document.createElement('div');
+        header.className = 'result-section-header';
+        header.innerHTML = `
+            <i class="${icon}"></i>
+            <h4>${title}</h4>
         `;
 
-        // Perfil Demográfico
-        if (avatarData.perfil_demografico) {
-            html += `
-                <div class="avatar-card">
-                    <h5><i class="fas fa-chart-pie"></i> Perfil Demográfico</h5>
-            `;
-            
-            for (const [key, value] of Object.entries(avatarData.perfil_demografico)) {
-                html += `
-                    <div class="avatar-item">
-                        <span class="avatar-label">${key.replace(/_/g, ' ')}</span>
-                        <span class="avatar-value">${value}</span>
-                    </div>
-                `;
-            }
-            html += `</div>`;
-        }
+        const content = document.createElement('div');
+        content.className = 'result-section-content';
+        content.innerHTML = this.formatComponentData(data, title);
 
-        // Perfil Psicográfico
-        if (avatarData.perfil_psicografico) {
-            html += `
-                <div class="avatar-card">
-                    <h5><i class="fas fa-brain"></i> Perfil Psicográfico</h5>
-            `;
-            
-            for (const [key, value] of Object.entries(avatarData.perfil_psicografico)) {
-                html += `
-                    <div class="avatar-item">
-                        <span class="avatar-label">${key.replace(/_/g, ' ')}</span>
-                        <span class="avatar-value">${value}</span>
-                    </div>
-                `;
-            }
-            html += `</div>`;
-        }
+        section.appendChild(header);
+        section.appendChild(content);
 
-        html += `</div>`;
-
-        // Dores Viscerais
-        if (avatarData.dores_viscerais && Array.isArray(avatarData.dores_viscerais)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            Dores Viscerais (${avatarData.dores_viscerais.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <ul class="insight-list">
-            `;
-            
-            avatarData.dores_viscerais.forEach(dor => {
-                html += `
-                    <li class="insight-item">
-                        <i class="fas fa-arrow-right"></i>
-                        <span class="insight-text">${dor}</span>
-                    </li>
-                `;
-            });
-            
-            html += `</ul></div></div>`;
-        }
-
-        // Desejos Secretos
-        if (avatarData.desejos_secretos && Array.isArray(avatarData.desejos_secretos)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-heart"></i>
-                            Desejos Secretos (${avatarData.desejos_secretos.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <ul class="insight-list">
-            `;
-            
-            avatarData.desejos_secretos.forEach(desejo => {
-                html += `
-                    <li class="insight-item">
-                        <i class="fas fa-star"></i>
-                        <span class="insight-text">${desejo}</span>
-                    </li>
-                `;
-            });
-            
-            html += `</ul></div></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
+        return section;
     }
 
-    displayDrivers(driversData) {
-        if (!driversData) return;
+    formatComponentData(data, title) {
+        if (!data) return '<p>Dados não disponíveis</p>';
 
-        const container = document.getElementById('driversResults');
-        if (!container) return;
+        let html = '';
 
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-brain"></i>
-                    <h4>Drivers Mentais Customizados</h4>
-                </div>
-                <div class="result-section-content">
-        `;
+        // Format based on component type
+        if (title.includes('Avatar')) {
+            html = this.formatAvatarData(data);
+        } else if (title.includes('Drivers')) {
+            html = this.formatDriversData(data);
+        } else if (title.includes('Anti-Objeção')) {
+            html = this.formatAntiObjectionData(data);
+        } else if (title.includes('Pré-Pitch')) {
+            html = this.formatPrePitchData(data);
+        } else if (title.includes('PROVIs')) {
+            html = this.formatProvisData(data);
+        } else if (title.includes('Forense')) {
+            html = this.formatForensicData(data);
+        } else if (title.includes('Dashboard')) {
+            html = this.formatDashboardData(data);
+        } else if (title.includes('Psicológica')) {
+            html = this.formatPsychologyData(data);
+        } else if (title.includes('Insights')) {
+            html = this.formatInsightsData(data);
+        } else if (title.includes('Pesquisa')) {
+            html = this.formatResearchData(data);
+        } else {
+            html = this.formatGenericData(data);
+        }
 
-        // Drivers Customizados
-        if (driversData.drivers_customizados && Array.isArray(driversData.drivers_customizados)) {
-            html += `<div class="drivers-grid">`;
+        return html;
+    }
+
+    formatDriversData(data) {
+        let html = '';
+
+        if (data.drivers_emocionais_primarios) {
+            html += '<h5><i class="fas fa-fire"></i> Drivers Emocionais Primários</h5>';
+            html += '<div class="drivers-grid">';
             
-            driversData.drivers_customizados.forEach((driver, index) => {
+            data.drivers_emocionais_primarios.forEach(driver => {
                 html += `
                     <div class="driver-card">
-                        <h4>Driver ${index + 1}: ${driver.nome || 'Driver Mental'}</h4>
+                        <h4>${driver.nome || 'Driver Emocional'}</h4>
                         <div class="driver-content">
                             <p><strong>Gatilho Central:</strong> ${driver.gatilho_central || 'N/A'}</p>
                             <p><strong>Definição:</strong> ${driver.definicao_visceral || 'N/A'}</p>
-                `;
-                
-                if (driver.roteiro_ativacao) {
-                    html += `
-                        <div class="driver-script">
-                            <h6>Roteiro de Ativação</h6>
-                            <p><strong>Pergunta:</strong> ${driver.roteiro_ativacao.pergunta_abertura || 'N/A'}</p>
-                            <p><strong>História:</strong> ${driver.roteiro_ativacao.historia_analogia || 'N/A'}</p>
-                            <p><strong>Comando:</strong> ${driver.roteiro_ativacao.comando_acao || 'N/A'}</p>
+                            
+                            ${driver.roteiro_ativacao ? `
+                                <div class="driver-script">
+                                    <h6><i class="fas fa-play"></i> Roteiro de Ativação</h6>
+                                    <p><strong>Pergunta:</strong> ${driver.roteiro_ativacao.pergunta_abertura || 'N/A'}</p>
+                                    <p><strong>História:</strong> ${driver.roteiro_ativacao.historia_analogia || 'N/A'}</p>
+                                    <p><strong>Comando:</strong> ${driver.roteiro_ativacao.comando_acao || 'N/A'}</p>
+                                </div>
+                            ` : ''}
+                            
+                            ${driver.frases_ancoragem ? `
+                                <div class="anchor-phrases">
+                                    <h6><i class="fas fa-anchor"></i> Frases de Ancoragem</h6>
+                                    <ul>
+                                        ${driver.frases_ancoragem.map(frase => `<li>"${frase}"</li>`).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
                         </div>
-                    `;
-                }
-                
-                if (driver.frases_ancoragem && Array.isArray(driver.frases_ancoragem)) {
-                    html += `
-                        <div class="anchor-phrases">
-                            <h6>Frases de Ancoragem</h6>
-                            <ul>
-                    `;
-                    driver.frases_ancoragem.forEach(frase => {
-                        html += `<li>"${frase}"</li>`;
-                    });
-                    html += `</ul></div>`;
-                }
-                
-                html += `</div></div>`;
+                    </div>
+                `;
             });
             
-            html += `</div>`;
+            html += '</div>';
         }
 
-        html += `</div></div>`;
-        container.innerHTML = html;
+        if (data.top_7_essenciais) {
+            html += '<h5><i class="fas fa-star"></i> Top 7 Drivers Essenciais</h5>';
+            html += '<div class="keyword-tags">';
+            data.top_7_essenciais.forEach(driver => {
+                html += `<span class="keyword-tag">${driver}</span>`;
+            });
+            html += '</div>';
+        }
+
+        return html;
     }
 
-    displayVisualProofs(proofsData) {
-        if (!proofsData || !Array.isArray(proofsData)) return;
+    formatAntiObjectionData(data) {
+        let html = '';
 
-        const container = document.getElementById('visualProofsResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-eye"></i>
-                    <h4>Provas Visuais Instantâneas</h4>
-                </div>
-                <div class="result-section-content">
-                    <div class="insights-showcase">
-        `;
-
-        proofsData.forEach((prova, index) => {
-            html += `
-                <div class="insight-card">
-                    <div class="insight-number">${index + 1}</div>
-                    <div class="insight-content">
-                        <h5>${prova.nome || 'Prova Visual'}</h5>
-                        <p><strong>Conceito:</strong> ${prova.conceito_alvo || 'N/A'}</p>
-                        <p><strong>Experimento:</strong> ${prova.experimento || 'N/A'}</p>
-            `;
-            
-            if (prova.materiais && Array.isArray(prova.materiais)) {
-                html += `
-                    <p><strong>Materiais:</strong></p>
-                    <ul>
-                `;
-                prova.materiais.forEach(material => {
-                    html += `<li>${material}</li>`;
+        if (data.resumo_executivo) {
+            html += '<h5><i class="fas fa-clipboard"></i> Resumo Executivo</h5>';
+            if (data.resumo_executivo.top_5_objecoes_criticas) {
+                html += '<h6>Top 5 Objeções Críticas:</h6>';
+                html += '<ul class="insight-list">';
+                data.resumo_executivo.top_5_objecoes_criticas.forEach(objecao => {
+                    html += `<li class="insight-item"><i class="fas fa-exclamation-triangle"></i><span class="insight-text">${objecao}</span></li>`;
                 });
-                html += `</ul>`;
+                html += '</ul>';
             }
+        }
+
+        if (data.objecoes_universais) {
+            html += '<h5><i class="fas fa-globe"></i> Objeções Universais</h5>';
             
-            html += `</div></div>`;
-        });
-
-        html += `</div></div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayAntiObjection(antiObjectionData) {
-        if (!antiObjectionData) return;
-
-        const container = document.getElementById('antiObjectionResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-shield-alt"></i>
-                    <h4>Sistema Anti-Objeção</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        // Objeções Universais
-        if (antiObjectionData.objecoes_universais) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-universal-access"></i>
-                            Objeções Universais
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-            `;
-            
-            for (const [tipo, objecao] of Object.entries(antiObjectionData.objecoes_universais)) {
+            Object.entries(data.objecoes_universais).forEach(([tipo, dados]) => {
                 html += `
                     <div class="info-card">
                         <strong>${tipo.toUpperCase()}</strong>
-                        <span>Objeção: ${objecao.objecao || 'N/A'}</span>
-                        <span>Contra-ataque: ${objecao.contra_ataque || 'N/A'}</span>
-                `;
-                
-                if (objecao.scripts_customizados && Array.isArray(objecao.scripts_customizados)) {
-                    html += `<ul>`;
-                    objecao.scripts_customizados.forEach(script => {
-                        html += `<li>${script}</li>`;
-                    });
-                    html += `</ul>`;
-                }
-                
-                html += `</div>`;
-            }
-            
-            html += `</div></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayPrePitch(prePitchData) {
-        if (!prePitchData) return;
-
-        const container = document.getElementById('prePitchResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-bullseye"></i>
-                    <h4>Pré-Pitch Invisível</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        // Roteiro Completo
-        if (prePitchData.roteiro_completo) {
-            html += `
-                <div class="expandable-section expanded">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-script"></i>
-                            Roteiro Completo
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-            `;
-            
-            for (const [secao, dados] of Object.entries(prePitchData.roteiro_completo)) {
-                html += `
-                    <div class="info-card">
-                        <strong>${secao.replace(/_/g, ' ').toUpperCase()}</strong>
-                `;
-                
-                if (typeof dados === 'object') {
-                    for (const [key, value] of Object.entries(dados)) {
-                        html += `<span><strong>${key.replace(/_/g, ' ')}:</strong> ${value}</span>`;
-                    }
-                } else {
-                    html += `<span>${dados}</span>`;
-                }
-                
-                html += `</div>`;
-            }
-            
-            html += `</div></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayPositioning(positioningData) {
-        if (!positioningData) return;
-
-        const container = document.getElementById('positioningResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-crosshairs"></i>
-                    <h4>Escopo e Posicionamento</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        if (positioningData.posicionamento_mercado) {
-            html += `
-                <div class="info-card">
-                    <strong>Posicionamento no Mercado</strong>
-                    <span>${positioningData.posicionamento_mercado}</span>
-                </div>
-            `;
-        }
-
-        if (positioningData.proposta_valor) {
-            html += `
-                <div class="info-card">
-                    <strong>Proposta de Valor</strong>
-                    <span>${positioningData.proposta_valor}</span>
-                </div>
-            `;
-        }
-
-        if (positioningData.diferenciais_competitivos && Array.isArray(positioningData.diferenciais_competitivos)) {
-            html += `
-                <div class="info-card">
-                    <strong>Diferenciais Competitivos</strong>
-                    <ul>
-            `;
-            positioningData.diferenciais_competitivos.forEach(diferencial => {
-                html += `<li>${diferencial}</li>`;
-            });
-            html += `</ul></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayCompetition(competitionData) {
-        if (!competitionData || !Array.isArray(competitionData)) return;
-
-        const container = document.getElementById('competitionResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-chess"></i>
-                    <h4>Análise de Concorrência</h4>
-                </div>
-                <div class="result-section-content">
-                    <table class="competition-table">
-                        <thead>
-                            <tr>
-                                <th>Concorrente</th>
-                                <th>Forças</th>
-                                <th>Fraquezas</th>
-                                <th>Estratégia</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-        `;
-
-        competitionData.forEach(competitor => {
-            const forcas = competitor.analise_swot?.forcas || [];
-            const fraquezas = competitor.analise_swot?.fraquezas || [];
-            
-            html += `
-                <tr>
-                    <td class="competitor-name">${competitor.nome || 'Concorrente'}</td>
-                    <td class="competitor-strengths">${forcas.slice(0, 3).join(', ')}</td>
-                    <td class="competitor-weaknesses">${fraquezas.slice(0, 3).join(', ')}</td>
-                    <td>${competitor.estrategia_marketing || 'N/A'}</td>
-                </tr>
-            `;
-        });
-
-        html += `</tbody></table></div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayKeywords(keywordsData) {
-        if (!keywordsData) return;
-
-        const container = document.getElementById('keywordsResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-key"></i>
-                    <h4>Estratégia de Palavras-Chave</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        // Palavras primárias
-        if (keywordsData.palavras_primarias && Array.isArray(keywordsData.palavras_primarias)) {
-            html += `
-                <div class="info-card">
-                    <strong>Palavras-Chave Primárias</strong>
-                    <div class="keyword-tags">
-            `;
-            keywordsData.palavras_primarias.forEach(keyword => {
-                html += `<span class="keyword-tag">${keyword}</span>`;
-            });
-            html += `</div></div>`;
-        }
-
-        // Palavras secundárias
-        if (keywordsData.palavras_secundarias && Array.isArray(keywordsData.palavras_secundarias)) {
-            html += `
-                <div class="info-card">
-                    <strong>Palavras-Chave Secundárias</strong>
-                    <div class="keyword-tags">
-            `;
-            keywordsData.palavras_secundarias.slice(0, 20).forEach(keyword => {
-                html += `<span class="keyword-tag secondary">${keyword}</span>`;
-            });
-            html += `</div></div>`;
-        }
-
-        // Long tail
-        if (keywordsData.long_tail && Array.isArray(keywordsData.long_tail)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-list"></i>
-                            Palavras-Chave Long Tail (${keywordsData.long_tail.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <div class="keyword-tags">
-            `;
-            keywordsData.long_tail.forEach(keyword => {
-                html += `<span class="keyword-tag long-tail">${keyword}</span>`;
-            });
-            html += `</div></div></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayMetrics(metricsData) {
-        if (!metricsData) return;
-
-        const container = document.getElementById('metricsResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-chart-line"></i>
-                    <h4>Métricas de Performance</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        // KPIs principais
-        if (metricsData.kpis_principais && Array.isArray(metricsData.kpis_principais)) {
-            html += `<div class="metrics-grid">`;
-            
-            metricsData.kpis_principais.forEach(kpi => {
-                html += `
-                    <div class="metric-card">
-                        <div class="metric-icon">
-                            <i class="fas fa-bullseye"></i>
-                        </div>
-                        <div class="metric-title">${kpi.metrica || 'Métrica'}</div>
-                        <div class="metric-value">${kpi.objetivo || 'N/A'}</div>
-                        <div class="metric-description">${kpi.frequencia || 'N/A'}</div>
+                        <span><strong>Objeção:</strong> ${dados.objecao || 'N/A'}</span>
+                        <span><strong>Contra-ataque:</strong> ${dados.contra_ataque || 'N/A'}</span>
+                        ${dados.scripts ? `
+                            <ul>
+                                ${dados.scripts.map(script => `<li>"${script}"</li>`).join('')}
+                            </ul>
+                        ` : ''}
                     </div>
                 `;
             });
-            
-            html += `</div>`;
         }
 
-        // Projeções financeiras
-        if (metricsData.projecoes_financeiras) {
-            html += `
-                <table class="projections-table">
-                    <thead>
-                        <tr>
-                            <th>Cenário</th>
-                            <th>Receita Mensal</th>
-                            <th>Clientes/Mês</th>
-                            <th>Ticket Médio</th>
-                            <th>Margem</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            const cenarios = ['cenario_conservador', 'cenario_realista', 'cenario_otimista'];
-            const labels = ['Conservador', 'Realista', 'Otimista'];
-            const classes = ['scenario-conservative', 'scenario-realistic', 'scenario-optimistic'];
-            
-            cenarios.forEach((cenario, index) => {
-                const dados = metricsData.projecoes_financeiras[cenario];
-                if (dados) {
-                    html += `
-                        <tr class="${classes[index]}">
-                            <td class="scenario-label">${labels[index]}</td>
-                            <td>${dados.receita_mensal || 'N/A'}</td>
-                            <td>${dados.clientes_mes || 'N/A'}</td>
-                            <td>${dados.ticket_medio || 'N/A'}</td>
-                            <td>${dados.margem_lucro || 'N/A'}</td>
-                        </tr>
-                    `;
-                }
+        if (data.arsenal_emergencia) {
+            html += '<h5><i class="fas fa-first-aid"></i> Arsenal de Emergência</h5>';
+            html += '<ul class="insight-list">';
+            data.arsenal_emergencia.forEach(frase => {
+                html += `<li class="insight-item"><i class="fas fa-quote-left"></i><span class="insight-text">"${frase}"</span></li>`;
             });
-            
-            html += `</tbody></table>`;
+            html += '</ul>';
         }
 
-        html += `</div></div>`;
-        container.innerHTML = html;
+        return html;
     }
 
-    displayFunnel(funnelData) {
-        if (!funnelData) return;
+    formatPrePitchData(data) {
+        let html = '';
 
-        const container = document.getElementById('funnelResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-filter"></i>
-                    <h4>Funil de Vendas Detalhado</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        const fases = ['topo_funil', 'meio_funil', 'fundo_funil'];
-        const labels = ['Topo do Funil', 'Meio do Funil', 'Fundo do Funil'];
-        const icons = ['fas fa-users', 'fas fa-user-friends', 'fas fa-user-check'];
-
-        fases.forEach((fase, index) => {
-            const dados = funnelData[fase];
-            if (dados) {
-                html += `
-                    <div class="info-card">
-                        <strong><i class="${icons[index]}"></i> ${labels[index]}</strong>
-                        <span><strong>Objetivo:</strong> ${dados.objetivo || 'N/A'}</span>
-                `;
-                
-                if (dados.estrategias && Array.isArray(dados.estrategias)) {
-                    html += `<span><strong>Estratégias:</strong></span><ul>`;
-                    dados.estrategias.forEach(estrategia => {
-                        html += `<li>${estrategia}</li>`;
-                    });
-                    html += `</ul>`;
-                }
-                
-                html += `</div>`;
-            }
-        });
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayActionPlan(actionPlanData) {
-        if (!actionPlanData) return;
-
-        const container = document.getElementById('actionPlanResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-tasks"></i>
-                    <h4>Plano de Ação Detalhado</h4>
-                </div>
-                <div class="result-section-content">
-                    <div class="action-timeline">
-        `;
-
-        const fases = Object.keys(actionPlanData);
-        
-        fases.forEach((fase, index) => {
-            const dados = actionPlanData[fase];
-            if (dados && typeof dados === 'object') {
+        if (data.orquestracao_emocional && data.orquestracao_emocional.sequencia_psicologica) {
+            html += '<h5><i class="fas fa-music"></i> Orquestração Emocional</h5>';
+            html += '<div class="action-timeline">';
+            
+            data.orquestracao_emocional.sequencia_psicologica.forEach((fase, index) => {
                 html += `
                     <div class="timeline-item">
                         <div class="timeline-marker"></div>
                         <div class="timeline-content">
                             <div class="timeline-title">
-                                ${fase.replace(/_/g, ' ').toUpperCase()}
-                                <span class="timeline-duration">${dados.duracao || 'N/A'}</span>
+                                FASE ${index + 1}: ${fase.fase || 'FASE'}
+                                <span class="timeline-duration">${fase.duracao || 'N/A'}</span>
                             </div>
+                            <p><strong>Objetivo:</strong> ${fase.objetivo || 'N/A'}</p>
+                            <p><strong>Intensidade:</strong> ${fase.intensidade || 'N/A'}</p>
+                            <p><strong>Resultado Esperado:</strong> ${fase.resultado_esperado || 'N/A'}</p>
+                            ${fase.drivers_utilizados ? `
+                                <p><strong>Drivers:</strong> ${fase.drivers_utilizados.join(', ')}</p>
+                            ` : ''}
+                        </div>
+                    </div>
                 `;
-                
-                if (dados.atividades && Array.isArray(dados.atividades)) {
-                    html += `<div class="timeline-activities">`;
-                    dados.atividades.forEach(atividade => {
-                        html += `
-                            <div class="timeline-activity">
-                                <i class="fas fa-check"></i>
-                                <span>${atividade}</span>
-                            </div>
-                        `;
-                    });
-                    html += `</div>`;
-                }
-                
-                if (dados.investimento) {
-                    html += `<p><strong>Investimento:</strong> ${dados.investimento}</p>`;
-                }
-                
-                html += `</div></div>`;
-            }
-        });
+            });
+            
+            html += '</div>';
+        }
 
-        html += `</div></div></div>`;
-        container.innerHTML = html;
+        if (data.roteiro_completo) {
+            html += '<h5><i class="fas fa-script"></i> Roteiro Completo</h5>';
+            
+            Object.entries(data.roteiro_completo).forEach(([secao, dados]) => {
+                if (typeof dados === 'object' && dados !== null) {
+                    html += `
+                        <div class="info-card">
+                            <strong>${secao.replace('_', ' ').toUpperCase()}</strong>
+                            <span><strong>Tempo:</strong> ${dados.tempo || 'N/A'}</span>
+                            <span><strong>Objetivo:</strong> ${dados.objetivo || 'N/A'}</span>
+                            <span><strong>Script:</strong> ${dados.script || 'N/A'}</span>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        return html;
     }
 
-    displayInsights(insightsData) {
-        if (!insightsData || !Array.isArray(insightsData)) return;
+    formatProvisData(data) {
+        let html = '';
 
-        const container = document.getElementById('insightsResults');
-        if (!container) return;
+        if (data.arsenal_provis) {
+            html += '<h5><i class="fas fa-magic"></i> Arsenal de PROVIs</h5>';
+            
+            data.arsenal_provis.forEach((provi, index) => {
+                html += `
+                    <div class="info-card">
+                        <strong>${provi.nome || `PROVI #${index + 1}`}</strong>
+                        <span><strong>Conceito-Alvo:</strong> ${provi.conceito_alvo || 'N/A'}</span>
+                        <span><strong>Categoria:</strong> ${provi.categoria || 'N/A'}</span>
+                        <span><strong>Prioridade:</strong> ${provi.prioridade || 'N/A'}</span>
+                        <span><strong>Experimento:</strong> ${provi.experimento || 'N/A'}</span>
+                        
+                        ${provi.materiais ? `
+                            <span><strong>Materiais:</strong></span>
+                            <ul>
+                                ${provi.materiais.map(material => `<li>${material}</li>`).join('')}
+                            </ul>
+                        ` : ''}
+                    </div>
+                `;
+            });
+        }
 
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-lightbulb"></i>
-                    <h4>Insights Exclusivos (${insightsData.length})</h4>
+        if (data.categorias_provis) {
+            html += '<h5><i class="fas fa-folder"></i> Categorias de PROVIs</h5>';
+            
+            if (data.categorias_provis.destruidoras_objecao) {
+                html += '<h6>Destruidoras de Objeção:</h6>';
+                data.categorias_provis.destruidoras_objecao.forEach(destruidora => {
+                    html += `
+                        <div class="info-card">
+                            <strong>Contra: "${destruidora.contra}"</strong>
+                            <span>Experimentos: ${destruidora.experimentos.join(', ')}</span>
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        return html;
+    }
+
+    formatForensicData(data) {
+        let html = '';
+
+        if (data.resumo_executivo) {
+            html += '<h5><i class="fas fa-gavel"></i> Resumo Executivo</h5>';
+            html += `
+                <div class="info-card">
+                    <strong>Veredicto Geral</strong>
+                    <span>${data.resumo_executivo.veredicto_geral || 'N/A'}</span>
                 </div>
-                <div class="result-section-content">
-                    <div class="insights-showcase">
-        `;
+            `;
+            
+            if (data.resumo_executivo.top_3_pontos_fortes) {
+                html += '<h6>Top 3 Pontos Mais Fortes:</h6>';
+                html += '<ul class="insight-list">';
+                data.resumo_executivo.top_3_pontos_fortes.forEach(ponto => {
+                    html += `<li class="insight-item"><i class="fas fa-star"></i><span class="insight-text">${ponto}</span></li>`;
+                });
+                html += '</ul>';
+            }
+        }
 
-        insightsData.forEach((insight, index) => {
+        if (data.dna_conversao) {
+            html += '<h5><i class="fas fa-dna"></i> DNA da Conversão</h5>';
+            html += `
+                <div class="info-card">
+                    <strong>Fórmula Estrutural</strong>
+                    <span>${data.dna_conversao.formula_estrutural || 'N/A'}</span>
+                </div>
+            `;
+            
+            if (data.dna_conversao.sequencia_gatilhos) {
+                html += '<h6>Sequência de Gatilhos:</h6>';
+                html += '<ul class="insight-list">';
+                data.dna_conversao.sequencia_gatilhos.forEach(gatilho => {
+                    html += `<li class="insight-item"><i class="fas fa-bolt"></i><span class="insight-text">${gatilho}</span></li>`;
+                });
+                html += '</ul>';
+            }
+        }
+
+        if (data.metricas_objetivas) {
+            html += '<h5><i class="fas fa-ruler"></i> Métricas Objetivas</h5>';
+            html += '<div class="metadata-grid">';
+            
+            Object.entries(data.metricas_objetivas).forEach(([key, value]) => {
+                html += `
+                    <div class="metadata-item">
+                        <span class="metadata-label">${key.replace('_', ' ')}</span>
+                        <span class="metadata-value">${value}</span>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+        }
+
+        return html;
+    }
+
+    formatDashboardData(data) {
+        let html = '';
+
+        if (data.visao_geral) {
+            html += '<h5><i class="fas fa-chart-pie"></i> Visão Geral</h5>';
+            html += `
+                <div class="info-card">
+                    <strong>Público Analisado</strong>
+                    <span>${data.visao_geral.publico_analisado || 'N/A'}</span>
+                </div>
+            `;
+            
+            if (data.visao_geral.distribuicao_faturamento) {
+                html += '<h6>Distribuição por Faturamento:</h6>';
+                html += '<div class="metadata-grid">';
+                
+                Object.entries(data.visao_geral.distribuicao_faturamento).forEach(([faixa, percentual]) => {
+                    html += `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${faixa.replace('_', ' ')}</span>
+                            <span class="metadata-value">${percentual}</span>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
+        }
+
+        if (data.analise_dores && data.analise_dores.top_10_dores_estruturadas) {
+            html += '<h5><i class="fas fa-heartbeat"></i> Top 10 Dores Estruturadas</h5>';
+            html += '<ul class="insight-list">';
+            
+            data.analise_dores.top_10_dores_estruturadas.forEach((dor, index) => {
+                html += `
+                    <li class="insight-item">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <div class="insight-text">
+                            <strong>${index + 1}. ${dor.dor || 'Dor'}</strong><br>
+                            <small>Frequência: ${dor.frequencia || 'N/A'} | Intensidade: ${dor.intensidade || 'N/A'}</small><br>
+                            <em>${dor.contexto || 'N/A'}</em>
+                        </div>
+                    </li>
+                `;
+            });
+            
+            html += '</ul>';
+        }
+
+        return html;
+    }
+
+    formatPsychologyData(data) {
+        let html = '';
+
+        if (data.perfil_psicologico_profundo) {
+            html += '<h5><i class="fas fa-user-secret"></i> Perfil Psicológico Profundo</h5>';
+            const perfil = data.perfil_psicologico_profundo;
+            
+            html += `
+                <div class="avatar-grid">
+                    <div class="avatar-card">
+                        <h5><i class="fas fa-id-card"></i> Identificação</h5>
+                        <div class="avatar-item">
+                            <span class="avatar-label">Nome Fictício</span>
+                            <span class="avatar-value">${perfil.nome_ficticio || 'N/A'}</span>
+                        </div>
+                        <div class="avatar-item">
+                            <span class="avatar-label">Idade</span>
+                            <span class="avatar-value">${perfil.idade_aproximada || 'N/A'}</span>
+                        </div>
+                        <div class="avatar-item">
+                            <span class="avatar-label">Ocupação</span>
+                            <span class="avatar-value">${perfil.ocupacao_situacao || 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (data.feridas_abertas) {
+            html += '<h5><i class="fas fa-heart-broken"></i> As Feridas Abertas</h5>';
+            html += '<ul class="insight-list">';
+            data.feridas_abertas.forEach(ferida => {
+                html += `<li class="insight-item"><i class="fas fa-bandage"></i><span class="insight-text">${ferida}</span></li>`;
+            });
+            html += '</ul>';
+        }
+
+        if (data.sonhos_proibidos) {
+            html += '<h5><i class="fas fa-star"></i> Os Sonhos Proibidos</h5>';
+            html += '<ul class="insight-list">';
+            data.sonhos_proibidos.forEach(sonho => {
+                html += `<li class="insight-item"><i class="fas fa-magic"></i><span class="insight-text">${sonho}</span></li>`;
+            });
+            html += '</ul>';
+        }
+
+        if (data.dialeto_alma) {
+            html += '<h5><i class="fas fa-comments"></i> O Dialeto da Alma</h5>';
+            
+            if (data.dialeto_alma.frases_dores) {
+                html += '<h6>Frases Típicas Sobre Dores:</h6>';
+                html += '<ul class="insight-list">';
+                data.dialeto_alma.frases_dores.forEach(frase => {
+                    html += `<li class="insight-item"><i class="fas fa-quote-left"></i><span class="insight-text">"${frase}"</span></li>`;
+                });
+                html += '</ul>';
+            }
+        }
+
+        return html;
+    }
+
+    formatAvatarData(data) {
+        let html = '';
+
+        if (data.perfil_demografico) {
+            html += '<h5><i class="fas fa-chart-bar"></i> Perfil Demográfico</h5>';
+            html += '<div class="avatar-grid">';
+            html += '<div class="avatar-card">';
+            html += '<h5><i class="fas fa-users"></i> Demografia</h5>';
+            
+            Object.entries(data.perfil_demografico).forEach(([key, value]) => {
+                html += `
+                    <div class="avatar-item">
+                        <span class="avatar-label">${key.replace('_', ' ')}</span>
+                        <span class="avatar-value">${value}</span>
+                    </div>
+                `;
+            });
+            
+            html += '</div></div>';
+        }
+
+        if (data.dores_viscerais) {
+            html += '<h5><i class="fas fa-heart-broken"></i> Dores Viscerais</h5>';
+            html += '<ul class="insight-list">';
+            data.dores_viscerais.forEach(dor => {
+                html += `<li class="insight-item"><i class="fas fa-exclamation-triangle"></i><span class="insight-text">${dor}</span></li>`;
+            });
+            html += '</ul>';
+        }
+
+        if (data.desejos_secretos) {
+            html += '<h5><i class="fas fa-star"></i> Desejos Secretos</h5>';
+            html += '<ul class="insight-list">';
+            data.desejos_secretos.forEach(desejo => {
+                html += `<li class="insight-item"><i class="fas fa-heart"></i><span class="insight-text">${desejo}</span></li>`;
+            });
+            html += '</ul>';
+        }
+
+        return html;
+    }
+
+    formatInsightsData(data) {
+        if (!Array.isArray(data)) return '<p>Formato de insights inválido</p>';
+
+        let html = '<div class="insights-showcase">';
+        
+        data.forEach((insight, index) => {
             html += `
                 <div class="insight-card">
                     <div class="insight-number">${index + 1}</div>
@@ -987,273 +746,174 @@ class AnalysisManager {
                 </div>
             `;
         });
-
-        html += `</div></div></div>`;
-        container.innerHTML = html;
+        
+        html += '</div>';
+        return html;
     }
 
-    displayFuturePredictions(futureData) {
-        if (!futureData) return;
+    formatResearchData(data) {
+        let html = '';
 
-        const container = document.getElementById('futureResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-crystal-ball"></i>
-                    <h4>Predições do Futuro</h4>
-                </div>
-                <div class="result-section-content">
-        `;
-
-        // Tendências atuais
-        if (futureData.tendencias_atuais) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-trending-up"></i>
-                            Tendências Atuais
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-            `;
+        if (data.estatisticas) {
+            html += '<h5><i class="fas fa-chart-line"></i> Estatísticas da Pesquisa</h5>';
+            html += '<div class="stats-grid">';
             
-            const tendencias = futureData.tendencias_atuais.tendencias_relevantes || {};
-            for (const [nome, dados] of Object.entries(tendencias)) {
-                html += `
-                    <div class="info-card">
-                        <strong>${nome.replace(/_/g, ' ').toUpperCase()}</strong>
-                        <span><strong>Fase:</strong> ${dados.fase_atual || 'N/A'}</span>
-                        <span><strong>Impacto:</strong> ${dados.impacto_esperado || 'N/A'}</span>
-                        <span><strong>Timeline:</strong> ${dados.timeline || 'N/A'}</span>
-                    </div>
-                `;
-            }
-            
-            html += `</div></div>`;
-        }
-
-        // Oportunidades emergentes
-        if (futureData.oportunidades_emergentes && Array.isArray(futureData.oportunidades_emergentes)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-rocket"></i>
-                            Oportunidades Emergentes (${futureData.oportunidades_emergentes.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-            `;
-            
-            futureData.oportunidades_emergentes.forEach(oportunidade => {
-                html += `
-                    <div class="info-card">
-                        <strong>${oportunidade.nome || 'Oportunidade'}</strong>
-                        <span>${oportunidade.descricao || 'N/A'}</span>
-                        <span><strong>Potencial:</strong> ${oportunidade.potencial_mercado || 'N/A'}</span>
-                        <span><strong>Timeline:</strong> ${oportunidade.timeline || 'N/A'}</span>
-                        <span><strong>ROI:</strong> ${oportunidade.roi_esperado || 'N/A'}</span>
-                    </div>
-                `;
-            });
-            
-            html += `</div></div>`;
-        }
-
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    displayResearch(researchData) {
-        if (!researchData) return;
-
-        const container = document.getElementById('researchResults');
-        if (!container) return;
-
-        let html = `
-            <div class="result-section">
-                <div class="result-section-header">
-                    <i class="fas fa-search"></i>
-                    <h4>Pesquisa Web Massiva</h4>
-                </div>
-                <div class="result-section-content">
-                    <div class="research-content">
-        `;
-
-        // Estatísticas da pesquisa
-        if (researchData.estatisticas) {
-            html += `
-                <div class="research-stats">
-                    <h5>Estatísticas da Pesquisa</h5>
-                    <div class="stats-grid">
-            `;
-            
-            for (const [key, value] of Object.entries(researchData.estatisticas)) {
+            Object.entries(data.estatisticas).forEach(([key, value]) => {
                 html += `
                     <div class="stat-item">
-                        <span class="stat-label">${key.replace(/_/g, ' ')}</span>
-                        <span class="stat-value">${value}</span>
+                        <span class="stat-label">${key.replace('_', ' ')}</span>
+                        <span class="stat-value">${typeof value === 'number' ? value.toLocaleString() : value}</span>
                     </div>
-                `;
-            }
-            
-            html += `</div></div>`;
-        }
-
-        // Queries executadas
-        if (researchData.queries_executadas && Array.isArray(researchData.queries_executadas)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-search"></i>
-                            Queries Executadas (${researchData.queries_executadas.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <ul class="insight-list">
-            `;
-            
-            researchData.queries_executadas.forEach(query => {
-                html += `
-                    <li class="insight-item">
-                        <i class="fas fa-search"></i>
-                        <span class="insight-text">${query}</span>
-                    </li>
                 `;
             });
             
-            html += `</ul></div></div>`;
+            html += '</div>';
         }
 
-        // Fontes consultadas
-        if (researchData.fontes && Array.isArray(researchData.fontes)) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-link"></i>
-                            Fontes Consultadas (${researchData.fontes.length})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <div class="results-list">
-            `;
+        if (data.fontes) {
+            html += '<h5><i class="fas fa-link"></i> Principais Fontes</h5>';
+            html += '<div class="results-list">';
             
-            researchData.fontes.slice(0, 20).forEach(fonte => {
+            data.fontes.slice(0, 10).forEach(fonte => {
                 html += `
                     <div class="result-item">
                         <h5>${fonte.title || 'Sem título'}</h5>
                         <div class="result-url">${fonte.url || 'N/A'}</div>
+                        ${fonte.quality_score ? `<div class="result-source">Qualidade: ${fonte.quality_score.toFixed(1)}%</div>` : ''}
                     </div>
                 `;
             });
             
-            html += `</div></div></div>`;
+            html += '</div>';
         }
 
-        html += `</div></div></div>`;
-        container.innerHTML = html;
+        return html;
     }
 
-    displayMetadata(metadataData) {
-        if (!metadataData) return;
+    formatGenericData(data) {
+        if (typeof data === 'string') {
+            return `<p>${data}</p>`;
+        }
 
-        const container = document.getElementById('metadataResults');
-        if (!container) return;
+        if (Array.isArray(data)) {
+            let html = '<ul class="insight-list">';
+            data.forEach(item => {
+                html += `<li class="insight-item"><i class="fas fa-chevron-right"></i><span class="insight-text">${item}</span></li>`;
+            });
+            html += '</ul>';
+            return html;
+        }
 
-        let html = `
+        if (typeof data === 'object' && data !== null) {
+            let html = '<div class="metadata-grid">';
+            
+            Object.entries(data).forEach(([key, value]) => {
+                if (typeof value === 'object') {
+                    html += `
+                        <div class="info-card">
+                            <strong>${key.replace('_', ' ')}</strong>
+                            <span>${JSON.stringify(value, null, 2)}</span>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${key.replace('_', ' ')}</span>
+                            <span class="metadata-value">${value}</span>
+                        </div>
+                    `;
+                }
+            });
+            
+            html += '</div>';
+            return html;
+        }
+
+        return `<p>${JSON.stringify(data, null, 2)}</p>`;
+    }
+
+    displayCompletenessReport(completeness) {
+        if (!completeness) return;
+
+        const container = document.getElementById('completenessResults') || this.createCompletenessContainer();
+        
+        const html = `
             <div class="result-section">
                 <div class="result-section-header">
-                    <i class="fas fa-info-circle"></i>
-                    <h4>Informações da Análise</h4>
+                    <i class="fas fa-check-circle"></i>
+                    <h4>Relatório de Completude do Documento</h4>
                 </div>
                 <div class="result-section-content">
-        `;
-
-        // Indicador de qualidade dos dados
-        html += `
-            <div class="data-quality-indicator">
-                <span class="quality-label">Qualidade dos Dados:</span>
-                <span class="quality-value real-data">100% DADOS REAIS</span>
+                    <div class="data-quality-indicator">
+                        <span class="quality-label">Taxa de Completude:</span>
+                        <span class="quality-value ${completeness.todos_componentes_incluidos ? 'real-data' : 'simulated-data'}">
+                            ${completeness.taxa_completude.toFixed(1)}%
+                        </span>
+                    </div>
+                    
+                    <div class="metadata-grid">
+                        <div class="metadata-item">
+                            <span class="metadata-label">Componentes Requeridos</span>
+                            <span class="metadata-value">${completeness.componentes_requeridos}</span>
+                        </div>
+                        <div class="metadata-item">
+                            <span class="metadata-label">Componentes Presentes</span>
+                            <span class="metadata-value">${completeness.componentes_presentes}</span>
+                        </div>
+                        <div class="metadata-item">
+                            <span class="metadata-label">Status</span>
+                            <span class="metadata-value">${completeness.todos_componentes_incluidos ? '✅ COMPLETO' : '⚠️ PARCIAL'}</span>
+                        </div>
+                    </div>
+                    
+                    ${completeness.componentes_ausentes.length > 0 ? `
+                        <h6>Componentes Ausentes:</h6>
+                        <ul class="insight-list">
+                            ${completeness.componentes_ausentes.map(comp => 
+                                `<li class="insight-item"><i class="fas fa-exclamation-triangle"></i><span class="insight-text">${comp}</span></li>`
+                            ).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
             </div>
         `;
-
-        // Metadata grid
-        html += `<div class="metadata-grid">`;
         
-        const metadataItems = [
-            { label: 'Tempo de Processamento', value: metadataData.processing_time_formatted || 'N/A' },
-            { label: 'Engine de Análise', value: metadataData.analysis_engine || 'N/A' },
-            { label: 'Gerado em', value: metadataData.generated_at ? new Date(metadataData.generated_at).toLocaleString('pt-BR') : 'N/A' },
-            { label: 'Score de Qualidade', value: metadataData.quality_score ? `${metadataData.quality_score}%` : 'N/A' },
-            { label: 'Fontes de Dados', value: metadataData.real_data_sources || 'N/A' },
-            { label: 'Conteúdo Analisado', value: metadataData.total_content_analyzed ? `${metadataData.total_content_analyzed.toLocaleString()} chars` : 'N/A' }
-        ];
-        
-        metadataItems.forEach(item => {
-            html += `
-                <div class="metadata-item">
-                    <span class="metadata-label">${item.label}</span>
-                    <span class="metadata-value">${item.value}</span>
-                </div>
-            `;
-        });
-        
-        html += `</div>`;
-
-        // Informações de arquivos locais
-        if (metadataData.local_files) {
-            html += `
-                <div class="expandable-section">
-                    <div class="expandable-header" onclick="this.parentElement.classList.toggle('expanded')">
-                        <div class="expandable-title">
-                            <i class="fas fa-folder"></i>
-                            Arquivos Locais Salvos (${metadataData.local_files.files_created || 0})
-                        </div>
-                        <i class="fas fa-chevron-down expandable-icon"></i>
-                    </div>
-                    <div class="expandable-content">
-                        <p>Análise salva em arquivos TXT separados:</p>
-                        <ul class="insight-list">
-            `;
-            
-            if (metadataData.local_files.files && Array.isArray(metadataData.local_files.files)) {
-                metadataData.local_files.files.forEach(file => {
-                    html += `
-                        <li class="insight-item">
-                            <i class="fas fa-file-alt"></i>
-                            <span class="insight-text">${file.name} (${file.type}) - ${(file.size / 1024).toFixed(1)} KB</span>
-                        </li>
-                    `;
-                });
-            }
-            
-            html += `</ul></div></div>`;
-        }
-
-        html += `</div></div>`;
         container.innerHTML = html;
     }
 
-    enableResultActions() {
-        const downloadPdfBtn = document.getElementById('downloadPdfBtn');
-        const saveJsonBtn = document.getElementById('saveJsonBtn');
-
-        if (downloadPdfBtn) {
-            downloadPdfBtn.style.display = 'inline-flex';
-            downloadPdfBtn.onclick = () => this.downloadPDF();
+    createCompletenessContainer() {
+        const container = document.createElement('div');
+        container.id = 'completenessResults';
+        container.className = 'result-container';
+        
+        const resultsContent = document.querySelector('.results-content');
+        if (resultsContent) {
+            resultsContent.insertBefore(container, resultsContent.firstChild);
         }
+        
+        return container;
+    }
 
-        if (saveJsonBtn) {
-            saveJsonBtn.style.display = 'inline-flex';
+    clearPreviousResults() {
+        const containers = document.querySelectorAll('.result-container');
+        containers.forEach(container => {
+            container.innerHTML = '';
+        });
+    }
+
+    checkPDFEligibility(analysis) {
+        // Check if analysis has sufficient quality for PDF
+        const hasAvatar = analysis.avatar_ultra_detalhado;
+        const hasInsights = analysis.insights_exclusivos && analysis.insights_exclusivos.length >= 3;
+        const hasDrivers = analysis.drivers_mentais_sistema_completo || analysis.drivers_mentais_customizados;
+        
+        const pdfBtn = document.getElementById('downloadPdfBtn');
+        if (pdfBtn) {
+            if (hasAvatar && hasInsights) {
+                pdfBtn.style.display = 'inline-flex';
+            } else {
+                pdfBtn.style.display = 'none';
+            }
         }
     }
 
@@ -1285,37 +945,69 @@ class AnalysisManager {
                 
                 this.showSuccess('PDF baixado com sucesso!');
             } else {
-                this.showError('Erro ao gerar PDF');
+                const error = await response.json();
+                this.showError(`Erro ao gerar PDF: ${error.message}`);
             }
-
         } catch (error) {
-            this.showError('Erro ao baixar PDF: ' + error.message);
+            console.error('PDF download error:', error);
+            this.showError('Erro ao baixar PDF');
         }
     }
 
     saveAnalysisLocally(analysis) {
-        if (!analysis) {
-            this.showError('Nenhuma análise disponível para salvar');
-            return;
+        try {
+            const dataStr = JSON.stringify(analysis, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `analise_completa_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            this.showSuccess('Análise salva localmente!');
+        } catch (error) {
+            console.error('Save error:', error);
+            this.showError('Erro ao salvar análise');
         }
-
-        const dataStr = JSON.stringify(analysis, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `analise_${analysis.metadata?.generated_at?.slice(0, 10) || new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        
-        URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        this.showSuccess('Análise salva localmente!');
     }
 
-    // Métodos de teste
+    showPartialDataRecovery(error) {
+        const recoveryHtml = `
+            <div class="info-card" style="margin-top: 20px; border-left: 4px solid #ffd700;">
+                <strong><i class="fas fa-exclamation-triangle"></i> Dados Parciais Disponíveis</strong>
+                <span>Alguns dados foram salvos automaticamente e podem ser recuperados.</span>
+                <button class="btn-secondary" onclick="analysisManager.recoverPartialData('${error.session_id}')">
+                    <i class="fas fa-download"></i> Recuperar Dados Parciais
+                </button>
+            </div>
+        `;
+        
+        const resultsArea = document.getElementById('resultsArea');
+        if (resultsArea) {
+            resultsArea.innerHTML = recoveryHtml;
+            resultsArea.style.display = 'block';
+        }
+    }
+
+    async recoverPartialData(sessionId) {
+        try {
+            const response = await fetch(`/api/get_analysis_files/${sessionId}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.showSuccess('Dados parciais recuperados!');
+                console.log('Dados recuperados:', data);
+            }
+        } catch (error) {
+            this.showError('Erro ao recuperar dados parciais');
+        }
+    }
+
+    // Test functions
     async testExtraction() {
         try {
             const response = await fetch('/api/test_extraction', {
@@ -1325,15 +1017,10 @@ class AnalysisManager {
             });
             
             const result = await response.json();
-            console.log('Teste de Extração:', result);
-            
-            if (result.success) {
-                this.showSuccess(`Extração OK: ${result.content_length} caracteres`);
-            } else {
-                this.showError(`Extração falhou: ${result.error}`);
-            }
+            console.log('Teste de extração:', result);
+            this.showSuccess(`Extração testada: ${result.success ? 'Sucesso' : 'Falha'}`);
         } catch (error) {
-            this.showError('Erro no teste: ' + error.message);
+            this.showError('Erro no teste de extração');
         }
     }
 
@@ -1346,15 +1033,10 @@ class AnalysisManager {
             });
             
             const result = await response.json();
-            console.log('Teste de Busca:', result);
-            
-            if (result.success) {
-                this.showSuccess(`Busca OK: ${result.results_count} resultados`);
-            } else {
-                this.showError(`Busca falhou: ${result.error}`);
-            }
+            console.log('Teste de busca:', result);
+            this.showSuccess(`Busca testada: ${result.results_count} resultados`);
         } catch (error) {
-            this.showError('Erro no teste: ' + error.message);
+            this.showError('Erro no teste de busca');
         }
     }
 
@@ -1362,22 +1044,28 @@ class AnalysisManager {
         try {
             const response = await fetch('/api/extractor_stats');
             const result = await response.json();
-            console.log('Estatísticas dos Extratores:', result);
+            console.log('Estatísticas dos extratores:', result);
             
-            if (result.success) {
-                const stats = result.stats;
-                let message = 'Estatísticas dos Extratores:\n';
-                
-                for (const [name, data] of Object.entries(stats)) {
-                    if (name !== 'global') {
-                        message += `${name}: ${data.available ? 'Ativo' : 'Inativo'}\n`;
+            let statsHtml = '<h4>📊 Estatísticas dos Extratores</h4>';
+            if (result.stats) {
+                Object.entries(result.stats).forEach(([extractor, stats]) => {
+                    if (extractor !== 'global') {
+                        statsHtml += `
+                            <div class="info-card">
+                                <strong>${extractor}</strong>
+                                <span>Disponível: ${stats.available ? '✅' : '❌'}</span>
+                                <span>Sucessos: ${stats.success || 0}</span>
+                                <span>Falhas: ${stats.failed || 0}</span>
+                                <span>Taxa de Sucesso: ${stats.success_rate || 0}%</span>
+                            </div>
+                        `;
                     }
-                }
-                
-                alert(message);
+                });
             }
+            
+            this.showModal('Estatísticas dos Extratores', statsHtml);
         } catch (error) {
-            this.showError('Erro ao obter stats: ' + error.message);
+            this.showError('Erro ao obter estatísticas');
         }
     }
 
@@ -1390,51 +1078,191 @@ class AnalysisManager {
             });
             
             const result = await response.json();
-            
-            if (result.success) {
-                this.showSuccess('Extratores resetados com sucesso!');
-            } else {
-                this.showError('Erro ao resetar extratores');
-            }
+            this.showSuccess('Extratores resetados com sucesso!');
         } catch (error) {
-            this.showError('Erro no reset: ' + error.message);
+            this.showError('Erro ao resetar extratores');
         }
     }
 
-    showError(message) {
-        this.showAlert(message, 'error');
+    async checkSystemStatus() {
+        try {
+            const response = await fetch('/api/status');
+            const status = await response.json();
+            
+            this.updateStatusIndicator(status.status);
+            this.updateAPIStatus(status.systems);
+            this.updateExtractorStatus();
+            
+        } catch (error) {
+            console.error('Status check error:', error);
+            this.updateStatusIndicator('error');
+        }
+    }
+
+    updateStatusIndicator(status) {
+        const indicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        
+        if (indicator && statusText) {
+            indicator.className = `status-indicator ${status}`;
+            
+            const statusMessages = {
+                'healthy': 'Sistema Online',
+                'degraded': 'Funcionalidade Limitada',
+                'error': 'Sistema Offline'
+            };
+            
+            statusText.textContent = statusMessages[status] || 'Status Desconhecido';
+        }
+    }
+
+    updateAPIStatus(systems) {
+        const apiStatus = document.getElementById('apiStatus');
+        if (apiStatus && systems) {
+            const aiCount = systems.ai_providers ? systems.ai_providers.available_count : 0;
+            const searchCount = systems.search_providers ? systems.search_providers.available_count : 0;
+            
+            apiStatus.innerHTML = `
+                <i class="fas fa-cog"></i>
+                <span>APIs: ${aiCount} IA + ${searchCount} Busca</span>
+            `;
+        }
+    }
+
+    updateExtractorStatus() {
+        const extractorStatus = document.getElementById('extractorStatus');
+        if (extractorStatus) {
+            fetch('/api/extractor_stats')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.stats && result.stats.global) {
+                        const successRate = result.stats.global.success_rate || 0;
+                        extractorStatus.innerHTML = `
+                            <i class="fas fa-download"></i>
+                            <span>Extratores: ${successRate.toFixed(1)}% sucesso</span>
+                        `;
+                    }
+                })
+                .catch(() => {
+                    extractorStatus.innerHTML = `
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>Extratores: Status desconhecido</span>
+                    `;
+                });
+        }
     }
 
     showSuccess(message) {
         this.showAlert(message, 'success');
     }
 
-    showAlert(message, type = 'info') {
-        // Remove alertas existentes
-        const existingAlerts = document.querySelectorAll('.alert');
-        existingAlerts.forEach(alert => alert.remove());
+    showError(message) {
+        this.showAlert(message, 'error');
+    }
 
+    showAlert(message, type) {
         const alert = document.createElement('div');
         alert.className = `alert alert-${type}`;
-        alert.textContent = message;
-
+        alert.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+            ${message}
+        `;
+        
         document.body.appendChild(alert);
-
-        // Remove após 5 segundos
+        
         setTimeout(() => {
-            if (alert.parentNode) {
-                alert.remove();
-            }
+            alert.remove();
         }, 5000);
+    }
+
+    showModal(title, content) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        `;
+        
+        modal.innerHTML = `
+            <div style="
+                background: var(--bg-elevated);
+                border-radius: var(--radius-xl);
+                padding: var(--spacing-8);
+                max-width: 800px;
+                max-height: 80vh;
+                overflow-y: auto;
+                width: 90%;
+            ">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-6);">
+                    <h3>${title}</h3>
+                    <button onclick="this.closest('.modal').remove()" style="
+                        background: none;
+                        border: none;
+                        color: var(--text-secondary);
+                        font-size: var(--font-size-xl);
+                        cursor: pointer;
+                    ">×</button>
+                </div>
+                <div>${content}</div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
     }
 }
 
-// Inicializa quando DOM estiver pronto
+// Initialize analysis manager
 document.addEventListener('DOMContentLoaded', () => {
     window.analysisManager = new AnalysisManager();
-    
-    // Adiciona ao objeto global app se existir
-    if (window.app) {
-        window.app.analysisManager = window.analysisManager;
-    }
 });
+
+// Global app object for compatibility
+window.app = {
+    sessionId: null,
+    
+    showError: (message) => {
+        if (window.analysisManager) {
+            window.analysisManager.showError(message);
+        } else {
+            console.error(message);
+        }
+    },
+    
+    showSuccess: (message) => {
+        if (window.analysisManager) {
+            window.analysisManager.showSuccess(message);
+        } else {
+            console.log(message);
+        }
+    },
+    
+    removeFile: (fileId) => {
+        // File removal handled by upload manager
+        console.log('File removed:', fileId);
+    },
+    
+    checkSystemHealth: async () => {
+        try {
+            const response = await fetch('/api/health');
+            return await response.json();
+        } catch (error) {
+            console.error('Health check error:', error);
+            return { status: 'error' };
+        }
+    }
+};

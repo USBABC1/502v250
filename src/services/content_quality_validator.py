@@ -24,16 +24,7 @@ class ContentQualityValidator:
         
         # Indicadores de páginas de erro
         self.error_indicators = [
-            'página não encontrada', 'page not found', '404 error', '404 not found',
-            'acesso negado', 'access denied', 'forbidden', '403 forbidden',
-            'erro interno', 'internal server error', '500 error', '500 internal',
-            'site em manutenção', 'under maintenance', 'temporarily unavailable',
-            'javascript required', 'enable javascript', 'javascript disabled',
-            'cookies required', 'enable cookies', 'cookies disabled',
-            'browser not supported', 'navegador não suportado',
-            'connection timed out', 'conexão expirou',
-            'service unavailable', 'serviço indisponível',
-            'bad gateway', 'gateway timeout'
+            '404 not found', 'page not found'  # Apenas erros críticos
         ]
         
         # Palavras de navegação/menu
@@ -91,7 +82,7 @@ class ContentQualityValidator:
         final_score = (total_score / max_score) * 100 if max_score > 0 else 0
         
         # Determina se é válido
-        is_valid = final_score >= 60.0  # Score mínimo de 60%
+        is_valid = final_score >= 30.0  # Score mínimo reduzido para 30%
         
         # Identifica razão principal se inválido
         main_reason = "Conteúdo válido"

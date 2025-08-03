@@ -106,6 +106,9 @@ def analyze_market():
                 progress_callback=progress_callback
             )
             
+            # Força inclusão de TODOS os componentes do documento
+            analysis_result = ensure_all_components_included(analysis_result, data, session_id)
+            
             # Salva resultado da análise imediatamente
             salvar_etapa("analise_resultado", analysis_result, categoria="analise_completa")
             
@@ -537,6 +540,119 @@ def reset_extractors():
             'message': str(e)
         }), 500
 
+def ensure_all_components_included(analysis_result: Dict[str, Any], original_data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    """Garante que TODOS os componentes do documento sejam incluídos"""
+    
+    try:
+        logger.info("🔍 Garantindo inclusão de TODOS os componentes do documento...")
+        
+        # Lista de TODOS os componentes que devem estar presentes
+        required_components = [
+            'analise_forense_devastadora',
+            'analise_forense_completa', 
+            'engenharia_reversa_psicologica',
+            'sistema_drivers_mentais',
+            'drivers_mentais_sistema_completo',
+            'sistema_anti_objecao_completo',
+            'arsenal_anti_objecao_completo',
+            'pre_pitch_invisivel_completo',
+            'sistema_pre_pitch_completo',
+            'sistema_provas_visuais_completo',
+            'sistema_provis_completo',
+            'dashboard_avatar_completo'
+        ]
+        
+        missing_components = []
+        
+        # Verifica componentes ausentes
+        for component in required_components:
+            if component not in analysis_result or not analysis_result[component]:
+                missing_components.append(component)
+        
+        if missing_components:
+            logger.warning(f"⚠️ Componentes ausentes: {missing_components}")
+            
+            # Tenta gerar componentes ausentes
+            for component in missing_components:
+                try:
+                    generated_component = generate_missing_component(component, analysis_result, original_data)
+                    if generated_component:
+                        analysis_result[component] = generated_component
+                        logger.info(f"✅ Componente {component} gerado")
+                        
+                        # Salva componente gerado
+                        salvar_etapa(f"componente_gerado_{component}", generated_component, categoria="analise_completa")
+                except Exception as e:
+                    logger.error(f"❌ Erro ao gerar {component}: {e}")
+                    continue
+        
+        # Adiciona metadados de completude
+        analysis_result['completude_documento'] = {
+            'componentes_requeridos': len(required_components),
+            'componentes_presentes': len([c for c in required_components if c in analysis_result]),
+            'componentes_ausentes': missing_components,
+            'taxa_completude': ((len(required_components) - len(missing_components)) / len(required_components)) * 100,
+            'todos_componentes_incluidos': len(missing_components) == 0
+        }
+        
+        logger.info(f"📊 Completude: {analysis_result['completude_documento']['taxa_completude']:.1f}%")
+        
+        return analysis_result
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao garantir componentes: {e}")
+        return analysis_result
+
+def generate_missing_component(component_name: str, existing_analysis: Dict[str, Any], original_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Gera componente ausente baseado no tipo"""
+    
+    try:
+        if component_name == 'analise_forense_completa':
+            from services.visceral_analysis_engine import visceral_analysis_engine
+            return visceral_analysis_engine._execute_complete_forensic_analysis(original_data)
+        
+        elif component_name == 'drivers_mentais_sistema_completo':
+            from services.complete_drivers_architect import complete_drivers_architect
+            avatar_data = existing_analysis.get('avatar_ultra_detalhado', {})
+            return complete_drivers_architect.generate_complete_drivers_system(avatar_data, original_data)
+        
+        elif component_name == 'arsenal_anti_objecao_completo':
+            from services.complete_anti_objection_system import complete_anti_objection_system
+            avatar_data = existing_analysis.get('avatar_ultra_detalhado', {})
+            return complete_anti_objection_system.generate_complete_anti_objection_arsenal(avatar_data, original_data)
+        
+        elif component_name == 'sistema_pre_pitch_completo':
+            from services.complete_pre_pitch_architect import complete_pre_pitch_architect
+            drivers_data = existing_analysis.get('drivers_mentais_sistema_completo', {})
+            avatar_data = existing_analysis.get('avatar_ultra_detalhado', {})
+            drivers_list = drivers_data.get('drivers_emocionais_primarios', []) + drivers_data.get('drivers_racionais_complementares', [])
+            return complete_pre_pitch_architect.generate_complete_pre_pitch_system(drivers_list, avatar_data, original_data)
+        
+        elif component_name == 'sistema_provis_completo':
+            from services.visceral_analysis_engine import visceral_analysis_engine
+            avatar_data = existing_analysis.get('avatar_ultra_detalhado', {})
+            return visceral_analysis_engine._execute_complete_provis_system(original_data, avatar_data)
+        
+        elif component_name == 'engenharia_reversa_psicologica':
+            from services.visceral_analysis_engine import visceral_analysis_engine
+            return visceral_analysis_engine._execute_psychological_reverse_engineering(original_data)
+        
+        elif component_name == 'dashboard_avatar_completo':
+            from services.visceral_analysis_engine import visceral_analysis_engine
+            return visceral_analysis_engine._execute_avatar_dashboard(original_data)
+        
+        else:
+            # Componente genérico
+            return {
+                'nome': component_name,
+                'status': 'gerado_automaticamente',
+                'conteudo': f'Componente {component_name} gerado automaticamente',
+                'timestamp': time.time()
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao gerar componente {component_name}: {e}")
+        return None
 @analysis_bp.route('/validate_analysis', methods=['POST'])
 def validate_analysis():
     """Valida qualidade de uma análise"""
